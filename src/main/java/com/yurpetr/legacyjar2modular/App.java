@@ -195,9 +195,8 @@ public class App {
         }
 
         private void repackJar(File value) {
-            // String command = "powershell.exe your command";
-            // Getting the version
-            // String command = "powershell.exe $PSVersionTable.PSVersion";
+
+            String javaHome = System.getProperty("java.home") + "\\bin\\";
 
             try {
                 Path tempDirectory = Files.createTempDirectory(value.getName());
@@ -205,34 +204,33 @@ public class App {
                 String outputDir = tempDirectory.toString();
                 System.out.println(outputDir);
 
-                String   jdepsPath = "c:\\Portable\\jdk\\azulsdk-21-fx\\bin\\jdeps.exe";
-                String[] command   = { "powershell.exe", jdepsPath, "--ignore-missing-deps",
-                        "--generate-module-info", outputDir, value.getAbsolutePath() };
+                String   jdepsPath    = "jdeps.exe";
+                String[] jdepsCommand = { "powershell.exe", javaHome + jdepsPath,
+                        "--ignore-missing-deps", "--generate-module-info", outputDir,
+                        value.getAbsolutePath() };
 
-                // Executing the command
-                executeCommand(command);
+                executeCommand(jdepsCommand);
 
                 try (Stream<Path> stream = Files.list(tempDirectory)) {
                     Set<String> dirs = stream.filter(file -> Files.isDirectory(file))
                             .map(Path::getFileName).map(Path::toString).collect(Collectors.toSet());
-                    dirs.stream().forEach(classPath -> {
+                    dirs.stream().forEach(packageName -> {
                         try {
 
-                            String   javacPath    = "c:\\Portable\\jdk\\azulsdk-21-fx\\bin\\javac.exe";
-                            String[] javacCommand = { "powershell.exe", javacPath, "--patch-module",
-                                    classPath + "=" + value.getAbsolutePath(),
-                                    outputDir + "\\" + classPath + "\\" + "module-info.java" };
+                            String   javacPath    = "javac.exe";
+                            String[] javacCommand = { "powershell.exe", javaHome + javacPath,
+                                    "--patch-module", packageName + "=" + value.getAbsolutePath(),
+                                    outputDir + "\\" + packageName + "\\" + "module-info.java" };
 
                             executeCommand(javacCommand);
 
-                            String   jarPath    = "c:\\Portable\\jdk\\azulsdk-21-fx\\bin\\jar.exe";
-                            String[] jarCommand = { "powershell.exe", jarPath, "uf",
-                                    value.getAbsolutePath(), "-C", outputDir + "\\" + classPath,
+                            String   jarPath    = "jar.exe";
+                            String[] jarCommand = { "powershell.exe", javaHome + jarPath, "uf",
+                                    value.getAbsolutePath(), "-C", outputDir + "\\" + packageName,
                                     "module-info.class" };
 
                             executeCommand(jarCommand);
                         } catch (IOException e) {
-                            // TODO Auto-generated catch block
                             e.printStackTrace();
                         }
 
@@ -248,10 +246,6 @@ public class App {
                 e.printStackTrace();
             }
 
-            // Getting the results
-
-            System.out.println(value.getAbsolutePath());
-
         }
 
         private void executeCommand(String[] command) throws IOException {
@@ -260,25 +254,24 @@ public class App {
 
             List<String> list = new ArrayList<>();
             String       line;
+
             System.out.println("Standard Output:");
             BufferedReader stdout = new BufferedReader(
                     new InputStreamReader(powerShellProcess.getInputStream()));
             while ((line = stdout.readLine()) != null) {
-
                 list.add(line);
-
                 System.out.println(line);
             }
-//                list.remove(0);
             stdout.close();
-            System.out.println("Standard Error:");
 
+            System.out.println("Standard Error:");
             BufferedReader stderr = new BufferedReader(
                     new InputStreamReader(powerShellProcess.getErrorStream()));
             while ((line = stderr.readLine()) != null) {
                 System.out.println(line);
             }
             stderr.close();
+
             System.out.println("Done");
         }
 
