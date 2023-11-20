@@ -71,9 +71,9 @@ public class App {
                 frame.setResizable(false);
                 frame.setLocationRelativeTo(null);
                 frame.setAlwaysOnTop(true);
-                frame.setVisible(true);
                 frame.add(new DropPane(), BorderLayout.SOUTH);
                 frame.pack();
+                frame.setVisible(true);
             }
         });
     }
@@ -96,10 +96,6 @@ public class App {
     }
 
     class DropArea extends JTextPane implements DropTargetListener {
-
-        /**
-         * 
-         */
 
         private DragState state = DragState.Waiting;
 
@@ -181,7 +177,7 @@ public class App {
                         state = DragState.Accept;
                         for (Object value : ((List) td)) {
                             if (value instanceof File) {
-                                repackJar((File) value);
+                                Repacker.repackJar((File) value);
                             }
                         }
                     }
@@ -194,85 +190,97 @@ public class App {
 
         }
 
-        private void repackJar(File value) {
+    }
 
-            String javaHome = System.getProperty("java.home") + "\\bin\\";
+    class Repacker {
+        private static final String JAVA_HOME = System.getProperty("java.home") + "\\bin\\";
+        private static boolean      isMultiRelease;
 
+        public static void repackJar(File value) {
+            isMultiRelease = false;
             try {
                 Path tempDirectory = Files.createTempDirectory(value.getName());
 
                 String outputDir = tempDirectory.toString();
                 System.out.println(outputDir);
 
-                String   jdepsPath    = "jdeps.exe";
-                String[] jdepsCommand = { "powershell.exe", javaHome + jdepsPath,
+                String   jdepsExe     = "jdeps.exe";
+                String[] jdepsCommand = { "powershell.exe", JAVA_HOME + jdepsExe,
                         "--ignore-missing-deps", "--generate-module-info", outputDir,
                         value.getAbsolutePath() };
-
                 executeCommand(jdepsCommand);
+                if (isMultiRelease) {
+                    jdepsCommand = new String[] { "powershell.exe", JAVA_HOME + jdepsExe,
+                            "--multi-release 21", "--ignore-missing-deps", "--generate-module-info",
+                            outputDir, value.getAbsolutePath() };
+                    executeCommand(jdepsCommand);
+                }
 
                 try (Stream<Path> stream = Files.list(tempDirectory)) {
                     Set<String> dirs = stream.filter(file -> Files.isDirectory(file))
                             .map(Path::getFileName).map(Path::toString).collect(Collectors.toSet());
                     dirs.stream().forEach(packageName -> {
-                        try {
+                        String   javacExe     = "javac.exe";
+                        String   filePath     = outputDir + "\\" + packageName
+                                + (isMultiRelease ? "\\versions\\21" : "");
+                        
+                        String[] javacCommand = { "powershell.exe", JAVA_HOME + javacExe,
+                                "--patch-module", packageName + "=" + value.getAbsolutePath(),
+                                filePath + "\\module-info.java" };
 
-                            String   javacPath    = "javac.exe";
-                            String[] javacCommand = { "powershell.exe", javaHome + javacPath,
-                                    "--patch-module", packageName + "=" + value.getAbsolutePath(),
-                                    outputDir + "\\" + packageName + "\\" + "module-info.java" };
+                        executeCommand(javacCommand);
 
-                            executeCommand(javacCommand);
+                        String   jarExe     = "jar.exe";
+                        String[] jarCommand = { "powershell.exe", JAVA_HOME + jarExe, "uf",
+                                value.getAbsolutePath(), "-C", filePath, "module-info.class" };
 
-                            String   jarPath    = "jar.exe";
-                            String[] jarCommand = { "powershell.exe", javaHome + jarPath, "uf",
-                                    value.getAbsolutePath(), "-C", outputDir + "\\" + packageName,
-                                    "module-info.class" };
-
-                            executeCommand(jarCommand);
-                        } catch (IOException e) {
-                            e.printStackTrace();
-                        }
-
+                        executeCommand(jarCommand);
                     });
-
                 }
 
-                Files.walk(tempDirectory).sorted(Comparator.reverseOrder()).map(Path::toFile)
-                        .forEach(File::delete);
+//                Files.walk(tempDirectory).sorted(Comparator.reverseOrder()).map(Path::toFile)
+//                        .forEach(File::delete);
 
             } catch (IOException e) {
-
                 e.printStackTrace();
             }
 
         }
 
-        private void executeCommand(String[] command) throws IOException {
-            Process powerShellProcess = new ProcessBuilder(command).start();
-            powerShellProcess.getOutputStream().close();
+        private static void executeCommand(String[] command) {
+            try {
+                Process powerShellProcess = new ProcessBuilder(command).start();
+                powerShellProcess.getOutputStream().close();
 
-            List<String> list = new ArrayList<>();
-            String       line;
+                List<String> list = new ArrayList<>();
+                String       line;
 
-            System.out.println("Standard Output:");
-            BufferedReader stdout = new BufferedReader(
-                    new InputStreamReader(powerShellProcess.getInputStream()));
-            while ((line = stdout.readLine()) != null) {
-                list.add(line);
-                System.out.println(line);
+                System.out.println("Standard Output:");
+                BufferedReader stdout = new BufferedReader(
+                        new InputStreamReader(powerShellProcess.getInputStream()));
+                while ((line = stdout.readLine()) != null) {
+                    list.add(line);
+                    System.out.println(line);
+                    if (line.contains("multi-release")) {
+                        isMultiRelease = true;
+                        stdout.close();
+                        return;
+                    }
+                }
+                stdout.close();
+
+                System.out.println("Standard Error:");
+                BufferedReader stderr = new BufferedReader(
+                        new InputStreamReader(powerShellProcess.getErrorStream()));
+                while ((line = stderr.readLine()) != null) {
+                    System.out.println(line);
+                }
+                stderr.close();
+
+                System.out.println("Done");
+            } catch (IOException e) {
+                e.printStackTrace();
             }
-            stdout.close();
-
-            System.out.println("Standard Error:");
-            BufferedReader stderr = new BufferedReader(
-                    new InputStreamReader(powerShellProcess.getErrorStream()));
-            while ((line = stderr.readLine()) != null) {
-                System.out.println(line);
-            }
-            stderr.close();
-
-            System.out.println("Done");
         }
 
     }
